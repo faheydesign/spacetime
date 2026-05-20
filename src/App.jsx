@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
+import "./App.css";
 import {
   AdditiveBlending,
   BufferAttribute,
@@ -111,6 +112,7 @@ function buildMassVisual(massVal, glowTex) {
 
 export default function SpacetimeCurvature() {
   const mountRef = useRef(null);
+  const hideAddMassTooltipRef = useRef(() => {});
 
   // Shared simulation state — Three.js reads directly from these refs
   const massesRef = useRef([]);          // [{ id, x, z, mass }]
@@ -121,6 +123,9 @@ export default function SpacetimeCurvature() {
 
   // React UI state — only drives panel re-render
   const [massesUI, setMassesUI] = useState([]);
+  const [showAddMassTooltip, setShowAddMassTooltip] = useState(true);
+
+  hideAddMassTooltipRef.current = () => setShowAddMassTooltip(false);
 
   // ── REACT CALLBACKS ───────────────────────────────────────────────────────
   const handleSlider = useCallback((id, rawVal) => {
@@ -395,6 +400,7 @@ export default function SpacetimeCurvature() {
     };
     const onMouseUp = (e) => {
       if (!simState.hasDragged) {
+        hideAddMassTooltipRef.current();
         const rect = mount.getBoundingClientRect();
         mouse.x = ((e.clientX - rect.left) / W) * 2 - 1;
         mouse.y = -((e.clientY - rect.top) / H) * 2 + 1;
@@ -434,129 +440,67 @@ export default function SpacetimeCurvature() {
   }, [handleRemove]);
 
   // ── UI ────────────────────────────────────────────────────────────────────
-  const mono = "'Courier New', Courier, monospace";
-  const lo = 1.0;
+  const sliderFill = (mass) =>
+    `${((mass - MASS_MIN) / (MASS_MAX - MASS_MIN)) * 100}%`;
 
   return (
-    <div style={{ width: "100%", height: "100vh", background: "#020307", position: "relative", overflow: "hidden", fontFamily: mono }}>
-      <div ref={mountRef} style={{ width: "100%", height: "100%", cursor: "crosshair" }} />
-
-      {/* Title */}
-      <div style={{ position: "absolute", top: 28, left: 32, pointerEvents: "none", userSelect: "none" }}>
-        <div style={{ fontSize: 13, letterSpacing: "0.3em", color: `rgba(140,200,255,${lo})`, marginBottom: 6 }}>
-          SPACETIME CURVATURE
-        </div>
-        <div style={{ fontSize: 10, letterSpacing: "0.18em", color: `rgba(100,160,220,${lo * 0.7})` }}>
-          GENERAL RELATIVITY · RUBBER SHEET ANALOGY
-        </div>
+    <div className="app">
+      <div className="canvas-mount">
+        <div ref={mountRef} className="canvas-surface" />
+        {showAddMassTooltip && (
+          <p className="grid-tooltip">Click to add mass</p>
+        )}
       </div>
 
+      <div className="title-block">
+        <div className="title-main">SPACETIME CURVATURE</div>
+        <div className="title-sub">GENERAL RELATIVITY · RUBBER SHEET ANALOGY</div>
+      </div>
 
-      {/* Per-mass control panel */}
       {massesUI.length > 0 && (
-        <div style={{
-          position: "absolute", top: 24, right: 28,
-          display: "flex", flexDirection: "column", gap: 10,
-          minWidth: 210,
-        }}>
-          <div style={{ fontSize: 9, letterSpacing: "0.25em", color: `rgba(80,140,200,${lo * 0.7})`, marginBottom: 2 }}>
-            MASS CONTROLS
-          </div>
+        <div className="controls-panel">
+          <div className="controls-heading">MASS CONTROLS</div>
           {massesUI.map((m, i) => (
-            <div key={m.id} style={{
-              background: "rgba(5,14,30,0.75)",
-              border: "1px solid rgba(60,120,200,0.18)",
-              borderRadius: 3,
-              padding: "8px 10px",
-              backdropFilter: "blur(6px)",
-            }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-                <span style={{ fontSize: 9, letterSpacing: "0.2em", color: `rgba(100,170,255,${lo})` }}>
+            <div key={m.id} className="mass-card">
+              <div className="mass-card-header">
+                <span className="mass-label">
                   BODY {String(i + 1).padStart(2, "0")}
                 </span>
-                <span style={{ fontSize: 11, letterSpacing: "0.12em", color: `rgba(160,210,255,${lo})`, marginLeft: 8 }}>
-                  {m.mass.toFixed(1)}
-                </span>
+                <span className="mass-value">{m.mass.toFixed(1)}</span>
                 <button
+                  type="button"
+                  className="mass-remove"
                   onClick={() => handleRemove(m.id)}
-                  style={{
-                    marginLeft: "auto",
-                    background: "none",
-                    border: "1px solid rgba(255,80,80,0.25)",
-                    borderRadius: 2,
-                    color: "rgba(255,100,100,0.5)",
-                    fontSize: 9,
-                    letterSpacing: "0.15em",
-                    padding: "2px 6px",
-                    cursor: "pointer",
-                    fontFamily: mono,
-                    transition: "all 0.15s",
-                  }}
-                  onMouseEnter={e => { e.target.style.borderColor = "rgba(255,80,80,0.7)"; e.target.style.color = "rgba(255,100,100,0.9)"; }}
-                  onMouseLeave={e => { e.target.style.borderColor = "rgba(255,80,80,0.25)"; e.target.style.color = "rgba(255,100,100,0.5)"; }}
                 >
                   REMOVE
                 </button>
               </div>
 
-              {/* Slider */}
-              <div style={{ position: "relative" }}>
+              <div className="mass-slider-wrap">
                 <input
                   type="range"
+                  className="mass-slider"
                   min={MASS_MIN}
                   max={MASS_MAX}
                   step={0.1}
                   value={m.mass}
-                  onChange={e => handleSlider(m.id, e.target.value)}
-                  style={{
-                    width: "100%",
-                    appearance: "none",
-                    height: 2,
-                    borderRadius: 1,
-                    outline: "none",
-                    cursor: "pointer",
-                    background: `linear-gradient(to right, rgba(100,180,255,0.7) ${((m.mass - MASS_MIN) / (MASS_MAX - MASS_MIN)) * 100}%, rgba(40,80,140,0.3) 0%)`,
-                  }}
+                  style={{ "--fill": sliderFill(m.mass) }}
+                  onChange={(e) => handleSlider(m.id, e.target.value)}
                 />
               </div>
 
-              <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4 }}>
-                <span style={{ fontSize: 8, color: `rgba(60,100,160,${lo * 0.6})`, letterSpacing: "0.1em" }}>{MASS_MIN}</span>
-                <span style={{ fontSize: 8, color: `rgba(60,100,160,${lo * 0.6})`, letterSpacing: "0.1em" }}>{MASS_MAX}</span>
+              <div className="mass-slider-labels">
+                <span className="mass-slider-bound">{MASS_MIN}m</span>
+                <span className="mass-slider-bound">{MASS_MAX}m</span>
               </div>
             </div>
           ))}
         </div>
       )}
 
-      {/* Bottom hint */}
-      <div style={{
-        position: "absolute", bottom: 28, left: "50%", transform: "translateX(-50%)",
-        textAlign: "center", pointerEvents: "none", userSelect: "none",
-        fontSize: 10, letterSpacing: "0.2em", color: `rgba(80,130,190,${lo * 0.7})`, whiteSpace: "nowrap",
-      }}>
-        CLICK TO PLACE MASS &nbsp;·&nbsp; DRAG TO ORBIT &nbsp;·&nbsp; SCROLL TO ZOOM
+      <div className="hint">
+        DRAG TO ORBIT &nbsp;·&nbsp; SCROLL TO ZOOM
       </div>
-
-      {/* Slider thumb styles injected globally */}
-      <style>{`
-        input[type=range]::-webkit-slider-thumb {
-          -webkit-appearance: none;
-          width: 10px; height: 10px;
-          border-radius: 50%;
-          background: rgba(140,200,255,0.85);
-          border: none;
-          cursor: pointer;
-          box-shadow: 0 0 6px rgba(100,180,255,0.6);
-        }
-        input[type=range]::-moz-range-thumb {
-          width: 10px; height: 10px;
-          border-radius: 50%;
-          background: rgba(140,200,255,0.85);
-          border: none;
-          cursor: pointer;
-        }
-      `}</style>
     </div>
   );
 }
