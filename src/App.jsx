@@ -29,8 +29,8 @@ import {
 } from "three";
 
 const GRID = 24;
-const SEGS = 80;
-const MAX_MASSES = 4;
+let SEGS = 80;
+let MAX_MASSES = 4;
 const NUM_PARTICLES = 18;
 const TRAIL_LENGTH = 90;
 const G = 2.8;
@@ -124,8 +124,18 @@ export default function SpacetimeCurvature() {
   // React UI state — only drives panel re-render
   const [massesUI, setMassesUI] = useState([]);
   const [showAddMassTooltip, setShowAddMassTooltip] = useState(true);
+  const [isMobileUI, setIsMobileUI] = useState(() => window.innerWidth < 768);
+  const [drawerOpen, setDrawerOpen] = useState(false);
 
   hideAddMassTooltipRef.current = () => setShowAddMassTooltip(false);
+
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 767px)");
+    const onChange = () => setIsMobileUI(mq.matches);
+    onChange();
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
 
   // ── REACT CALLBACKS ───────────────────────────────────────────────────────
   const handleSlider = useCallback((id, rawVal) => {
@@ -165,11 +175,21 @@ export default function SpacetimeCurvature() {
   useEffect(() => {
     const mount = mountRef.current;
     if (!mount) return;
+
+    SEGS = 80;
+    MAX_MASSES = 4;
+    if (window.innerWidth < 768) {
+      SEGS = 48;
+      MAX_MASSES = 2;
+    }
+
     let W = mount.clientWidth, H = mount.clientHeight;
 
     const simState = {
       theta: 0.6, phi: 1.05, radius: 32,
       isDragging: false, hasDragged: false,
+      isPinching: false,
+      prevPinchDist: 0,
       prevMouse: { x: 0, y: 0 },
       ripples: [],
       particles: Array.from({ length: NUM_PARTICLES }, (_, i) => spawnParticle(i)),
@@ -386,41 +406,122 @@ export default function SpacetimeCurvature() {
     const raycaster = new Raycaster();
     const mouse = new Vector2();
 
-    const onMouseDown = (e) => {
-      simState.isDragging = true; simState.hasDragged = false;
-      simState.prevMouse = { x: e.clientX, y: e.clientY };
+    const pinchDistance = (touches) => {
+      const dx = touches[0].clientX - touches[1].clientX;
+      const dy = touches[0].clientY - touches[1].clientY;
+      return Math.hypot(dx, dy);
     };
-    const onMouseMove = (e) => {
-      if (!simState.isDragging) return;
-      const dx = e.clientX - simState.prevMouse.x, dy = e.clientY - simState.prevMouse.y;
+
+    const applyOrbit = (dx, dy) => {
       if (Math.abs(dx) > 3 || Math.abs(dy) > 3) simState.hasDragged = true;
       simState.theta -= dx * 0.007;
       simState.phi = Math.max(0.28, Math.min(1.48, simState.phi + dy * 0.007));
+    };
+
+    const tryPlaceMass = (clientX, clientY) => {
+      hideAddMassTooltipRef.current();
+      const rect = mount.getBoundingClientRect();
+      mouse.x = ((clientX - rect.left) / W) * 2 - 1;
+      mouse.y = -((clientY - rect.top) / H) * 2 + 1;
+      raycaster.setFromCamera(mouse, camera);
+      const hits = raycaster.intersectObject(hitPlane);
+      if (hits.length > 0) {
+        const pt = hits[0].point;
+        if (Math.abs(pt.x) <= GRID / 2 && Math.abs(pt.z) <= GRID / 2) {
+          addMass(pt.x, pt.z, 2.2 + Math.random() * 2.2);
+        }
+      }
+    };
+
+    const onMouseDown = (e) => {
+      simState.isDragging = true;
+      simState.hasDragged = false;
+      simState.isPinching = false;
+      simState.prevMouse = { x: e.clientX, y: e.clientY };
+    };
+    const onMouseMove = (e) => {
+      if (!simState.isDragging || simState.isPinching) return;
+      const dx = e.clientX - simState.prevMouse.x;
+      const dy = e.clientY - simState.prevMouse.y;
+      applyOrbit(dx, dy);
       simState.prevMouse = { x: e.clientX, y: e.clientY };
     };
     const onMouseUp = (e) => {
-      if (!simState.hasDragged) {
-        hideAddMassTooltipRef.current();
-        const rect = mount.getBoundingClientRect();
-        mouse.x = ((e.clientX - rect.left) / W) * 2 - 1;
-        mouse.y = -((e.clientY - rect.top) / H) * 2 + 1;
-        raycaster.setFromCamera(mouse, camera);
-        const hits = raycaster.intersectObject(hitPlane);
-        if (hits.length > 0) {
-          const pt = hits[0].point;
-          if (Math.abs(pt.x) <= GRID / 2 && Math.abs(pt.z) <= GRID / 2) {
-            addMass(pt.x, pt.z, 2.2 + Math.random() * 2.2);
+      if (simState.isDragging && !simState.hasDragged) tryPlaceMass(e.clientX, e.clientY);
+      simState.isDragging = false;
+    };
+    const onWheel = (e) => {
+      simState.radius = Math.max(14, Math.min(60, simState.radius + e.deltaY * 0.04));
+    };
+
+    const onTouchStart = (e) => {
+      if (e.touches.length >= 2) {
+        e.preventDefault();
+        simState.isPinching = true;
+        simState.isDragging = false;
+        simState.hasDragged = true;
+        simState.prevPinchDist = pinchDistance(e.touches);
+        return;
+      }
+      const t = e.touches[0];
+      simState.isPinching = false;
+      simState.isDragging = true;
+      simState.hasDragged = false;
+      simState.prevMouse = { x: t.clientX, y: t.clientY };
+    };
+    const onTouchMove = (e) => {
+      if (e.touches.length >= 2) {
+        e.preventDefault();
+        const dist = pinchDistance(e.touches);
+        if (!simState.isPinching) {
+          simState.isPinching = true;
+          simState.isDragging = false;
+          simState.hasDragged = true;
+          simState.prevPinchDist = dist;
+          return;
+        }
+        const delta = dist - simState.prevPinchDist;
+        simState.radius = Math.max(14, Math.min(60, simState.radius - delta * 0.08));
+        simState.prevPinchDist = dist;
+        return;
+      }
+      if (!simState.isDragging || simState.isPinching) return;
+      e.preventDefault();
+      const t = e.touches[0];
+      const dx = t.clientX - simState.prevMouse.x;
+      const dy = t.clientY - simState.prevMouse.y;
+      applyOrbit(dx, dy);
+      simState.prevMouse = { x: t.clientX, y: t.clientY };
+    };
+    const onTouchEnd = (e) => {
+      if (simState.isPinching) {
+        if (e.touches.length < 2) {
+          simState.isPinching = false;
+          if (e.touches.length === 1) {
+            simState.isDragging = true;
+            simState.hasDragged = true;
+            simState.prevMouse = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+          } else {
+            simState.isDragging = false;
           }
         }
+        return;
+      }
+      if (simState.isDragging && !simState.hasDragged) {
+        const t = e.changedTouches[0];
+        if (t) tryPlaceMass(t.clientX, t.clientY);
       }
       simState.isDragging = false;
     };
-    const onWheel = (e) => { simState.radius = Math.max(14, Math.min(60, simState.radius + e.deltaY * 0.04)); };
 
     mount.addEventListener("mousedown", onMouseDown);
     window.addEventListener("mousemove", onMouseMove);
     window.addEventListener("mouseup", onMouseUp);
     mount.addEventListener("wheel", onWheel, { passive: true });
+    mount.addEventListener("touchstart", onTouchStart, { passive: false });
+    window.addEventListener("touchmove", onTouchMove, { passive: false });
+    window.addEventListener("touchend", onTouchEnd);
+    window.addEventListener("touchcancel", onTouchEnd);
     const onResize = () => {
       W = mount.clientWidth; H = mount.clientHeight;
       camera.aspect = W / H; camera.updateProjectionMatrix(); renderer.setSize(W, H);
@@ -433,6 +534,10 @@ export default function SpacetimeCurvature() {
       window.removeEventListener("mousemove", onMouseMove);
       window.removeEventListener("mouseup", onMouseUp);
       mount.removeEventListener("wheel", onWheel);
+      mount.removeEventListener("touchstart", onTouchStart);
+      window.removeEventListener("touchmove", onTouchMove);
+      window.removeEventListener("touchend", onTouchEnd);
+      window.removeEventListener("touchcancel", onTouchEnd);
       window.removeEventListener("resize", onResize);
       if (mount.contains(renderer.domElement)) mount.removeChild(renderer.domElement);
       renderer.dispose();
@@ -444,11 +549,13 @@ export default function SpacetimeCurvature() {
     `${((mass - MASS_MIN) / (MASS_MAX - MASS_MIN)) * 100}%`;
 
   return (
-    <div className="app">
+    <div className={`app${isMobileUI ? " is-mobile" : ""}`}>
       <div className="canvas-mount">
         <div ref={mountRef} className="canvas-surface" />
         {showAddMassTooltip && (
-          <p className="grid-tooltip">Click to add mass</p>
+          <p className="grid-tooltip">
+            {isMobileUI ? "Tap to add mass" : "Click to add mass"}
+          </p>
         )}
       </div>
 
@@ -458,48 +565,79 @@ export default function SpacetimeCurvature() {
       </div>
 
       {massesUI.length > 0 && (
-        <div className="controls-panel">
-          <div className="controls-heading">MASS CONTROLS</div>
-          {massesUI.map((m, i) => (
-            <div key={m.id} className="mass-card">
-              <div className="mass-card-header">
-                <span className="mass-label">
-                  BODY {String(i + 1).padStart(2, "0")}
-                </span>
-                <span className="mass-value">{m.mass.toFixed(1)}</span>
+        <div
+          className={`controls-panel${isMobileUI ? " controls-drawer" : ""}${isMobileUI && drawerOpen ? " is-open" : ""}`}
+        >
+          {isMobileUI && (
+            <div className="drawer-bar">
+              {drawerOpen ? (
+                <>
+                  <span className="drawer-title">MASS CONTROLS</span>
+                  <button
+                    type="button"
+                    className="drawer-close"
+                    onClick={() => setDrawerOpen(false)}
+                    aria-label="Close mass controls"
+                  >
+                    ×
+                  </button>
+                </>
+              ) : (
                 <button
                   type="button"
-                  className="mass-remove"
-                  onClick={() => handleRemove(m.id)}
+                  className="drawer-handle"
+                  onClick={() => setDrawerOpen(true)}
+                  aria-expanded={false}
                 >
-                  REMOVE
+                  MASS CONTROLS
                 </button>
-              </div>
-
-              <div className="mass-slider-wrap">
-                <input
-                  type="range"
-                  className="mass-slider"
-                  min={MASS_MIN}
-                  max={MASS_MAX}
-                  step={0.1}
-                  value={m.mass}
-                  style={{ "--fill": sliderFill(m.mass) }}
-                  onChange={(e) => handleSlider(m.id, e.target.value)}
-                />
-              </div>
-
-              <div className="mass-slider-labels">
-                <span className="mass-slider-bound">{MASS_MIN}m</span>
-                <span className="mass-slider-bound">{MASS_MAX}m</span>
-              </div>
+              )}
             </div>
-          ))}
+          )}
+          <div className="drawer-body">
+            {!isMobileUI && <div className="controls-heading">MASS CONTROLS</div>}
+            {massesUI.map((m, i) => (
+              <div key={m.id} className="mass-card">
+                <div className="mass-card-header">
+                  <span className="mass-label">
+                    BODY {String(i + 1).padStart(2, "0")}
+                  </span>
+                  <span className="mass-value">{m.mass.toFixed(1)}</span>
+                  <button
+                    type="button"
+                    className="mass-remove"
+                    onClick={() => handleRemove(m.id)}
+                  >
+                    REMOVE
+                  </button>
+                </div>
+
+                <div className="mass-slider-wrap">
+                  <input
+                    type="range"
+                    className="mass-slider"
+                    min={MASS_MIN}
+                    max={MASS_MAX}
+                    step={0.1}
+                    value={m.mass}
+                    style={{ "--fill": sliderFill(m.mass) }}
+                    onChange={(e) => handleSlider(m.id, e.target.value)}
+                  />
+                </div>
+
+                <div className="mass-slider-labels">
+                  <span className="mass-slider-bound">{MASS_MIN}m</span>
+                  <span className="mass-slider-bound">{MASS_MAX}m</span>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
       <div className="hint">
-        DRAG TO ORBIT &nbsp;·&nbsp; SCROLL TO ZOOM
+        DRAG TO ORBIT &nbsp;·&nbsp;{" "}
+        {isMobileUI ? "PINCH TO ZOOM" : "SCROLL TO ZOOM"}
       </div>
     </div>
   );
