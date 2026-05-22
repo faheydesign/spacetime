@@ -561,7 +561,17 @@ export default function SpacetimeCurvature() {
 
       <div className="title-block">
         <div className="title-main">SPACETIME CURVATURE</div>
-        <div className="title-sub">GENERAL RELATIVITY · RUBBER SHEET ANALOGY</div>
+        <div className="title-sub">
+          {isMobileUI ? (
+            <>
+              GENERAL RELATIVITY
+              <br />
+              RUBBER SHEET ANALOGY
+            </>
+          ) : (
+            "GENERAL RELATIVITY · RUBBER SHEET ANALOGY"
+          )}
+        </div>
       </div>
 
       {massesUI.length > 0 && (
